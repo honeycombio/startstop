@@ -84,7 +84,8 @@ func Start(objects []*inject.Object, log Logger) error {
 }
 
 // Stop the graph, in the right order. Stop will call Stop or Close if an
-// object satisfies the associated interface.
+// object satisfies the associated interface. Unlike Start(), logs and
+// continues if a Stop or Close call returns an error.
 func Stop(objects []*inject.Object, log Logger) error {
 	levels, err := levels(objects)
 	if err != nil {
@@ -101,7 +102,6 @@ func Stop(objects []*inject.Object, log Logger) error {
 					if log != nil {
 						log.Errorf("error stopping %s: %s", o, err)
 					}
-					return err
 				}
 			}
 			if closerO, ok := o.Value.(Closer); ok {
@@ -112,7 +112,6 @@ func Stop(objects []*inject.Object, log Logger) error {
 					if log != nil {
 						log.Errorf("error closing %s: %s", o, err)
 					}
-					return err
 				}
 			}
 		}

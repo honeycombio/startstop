@@ -9,7 +9,7 @@ import (
 
 	"github.com/facebookgo/ensure"
 	"github.com/facebookgo/inject"
-	"github.com/facebookgo/startstop"
+	"github.com/honeycombio/startstop"
 )
 
 type testLogger struct {
@@ -142,28 +142,39 @@ func TestTryStartError(t *testing.T) {
 }
 
 func TestStopError(t *testing.T) {
-	fin := make(chan struct{})
+	var stopped bool
 	actual := errors.New("err")
-	obj := &startStop{
+	obj1 := &startStop{
 		start: func() error { return nil },
 		stop: func() error {
-			defer close(fin)
+			stopped = true
+			return nil
+		},
+	}
+	obj2 := &startStop2{
+		start: func() error { return nil },
+		stop: func() error {
 			return actual
 		},
 	}
 	logger := &testLogger{}
 
 	var g inject.Graph
-	ensure.Nil(t, g.Provide(&inject.Object{Value: obj}))
+	ensure.Nil(t, g.Provide(
+		&inject.Object{Value: obj1},
+		&inject.Object{Value: obj2},
+	))
 	ensure.Nil(t, g.Populate())
 	ensure.Nil(t, startstop.Start(g.Objects(), logger))
-	ensure.DeepEqual(t, startstop.Stop(g.Objects(), logger), actual)
+	ensure.Nil(t, startstop.Stop(g.Objects(), logger))
 	ensure.DeepEqual(t, logger.debugs, []string{
 		"starting *startstop_test.startStop",
+		"starting *startstop_test.startStop2",
+		"stopping *startstop_test.startStop2",
 		"stopping *startstop_test.startStop",
 	})
-	ensure.DeepEqual(t, logger.errors, []string{"error stopping *startstop_test.startStop: err"})
-	<-fin
+	ensure.DeepEqual(t, logger.errors, []string{"error stopping *startstop_test.startStop2: err"})
+	ensure.True(t, stopped)
 }
 
 func TestStartOrder(t *testing.T) {
@@ -275,7 +286,7 @@ func TestCloseError(t *testing.T) {
 	ensure.Nil(t, g.Provide(&inject.Object{Value: obj}))
 	ensure.Nil(t, g.Populate())
 	ensure.Nil(t, startstop.Start(g.Objects(), logger))
-	ensure.DeepEqual(t, startstop.Stop(g.Objects(), logger), actual)
+	ensure.Nil(t, startstop.Stop(g.Objects(), logger))
 	ensure.DeepEqual(t, logger.debugs, []string{
 		"opening *startstop_test.openClose",
 		"closing *startstop_test.openClose",

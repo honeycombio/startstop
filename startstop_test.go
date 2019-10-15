@@ -1,13 +1,14 @@
 package startstop_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
 	"sync"
 	"testing"
 
-	"github.com/facebookgo/ensure"
+	"github.com/facebookarchive/ensure"
 	"github.com/facebookgo/inject"
 	"github.com/honeycombio/startstop"
 )
@@ -293,6 +294,75 @@ func TestCloseError(t *testing.T) {
 	})
 	ensure.DeepEqual(t, logger.errors, []string{"error closing *startstop_test.openClose: err"})
 	<-fin
+}
+
+type startStopBoth struct {
+	start        func() error
+	stop         func() error
+	startContext func(context.Context) error
+	stopContext  func(context.Context) error
+}
+
+func (s *startStopBoth) Start() error {
+	return s.start()
+}
+
+func (s *startStopBoth) Stop() error {
+	return s.stop()
+}
+
+func (s *startStopBoth) StartContext(ctx context.Context) error {
+	return s.startContext(ctx)
+}
+
+func (s *startStopBoth) StopContext(ctx context.Context) error {
+	return s.stopContext(ctx)
+}
+
+func TestStartStopContextNoContext(t *testing.T) {
+	// Should still work with a mix of objects even if some don't support the Context interfaces
+	// If both are supported, only the context methods get called
+	var startCalls int
+	var stopCalls int
+	objs := []*inject.Object{
+		&inject.Object{Value: &startStop{
+			start: func() error {
+				startCalls++
+				return nil
+			},
+			stop: func() error {
+				stopCalls++
+				return nil
+			},
+		}},
+		&inject.Object{Value: &startStopBoth{
+			start: func() error {
+				startCalls++
+				return fmt.Errorf("should not be called")
+			},
+			stop: func() error {
+				stopCalls++
+				return fmt.Errorf("should not be called")
+			},
+			startContext: func(ctx context.Context) error {
+				startCalls++
+				return nil
+			},
+			stopContext: func(ctx context.Context) error {
+				stopCalls++
+				return nil
+			},
+		}},
+	}
+
+	var g inject.Graph
+	ensure.Nil(t, g.Provide(objs...))
+	ensure.Nil(t, g.Populate())
+	ensure.Nil(t, startstop.StartContext(context.Background(), g.Objects(), nil))
+	ensure.DeepEqual(t, startCalls, 2)
+
+	ensure.Nil(t, startstop.StopContext(context.Background(), g.Objects(), nil))
+	ensure.DeepEqual(t, stopCalls, 2)
 }
 
 type caseStartStop struct {

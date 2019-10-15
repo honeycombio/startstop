@@ -4,6 +4,7 @@ package startstop
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"sort"
 
@@ -16,10 +17,22 @@ type Opener interface {
 	Open() error
 }
 
+// ContextOpener defines the Open method, objects satisfying this interface will be
+// opened by Start.
+type ContextOpener interface {
+	OpenContext(context.Context) error
+}
+
 // Closer defines the Close method, objects satisfying this interface will be
 // closed by Stop.
 type Closer interface {
 	Close() error
+}
+
+// ContextCloser defines the Close method, objects satisfying this interface will be
+// closed by Stop.
+type ContextCloser interface {
+	CloseContext(context.Context) error
 }
 
 // Starter defines the Start method, objects satisfying this interface will be
@@ -28,10 +41,22 @@ type Starter interface {
 	Start() error
 }
 
+// ContextStarter defines the StartContext method. Objects satisfying this interface will be
+// started by StartContext
+type ContextStarter interface {
+	StartContext(context.Context) error
+}
+
 // Stopper defines the Stop method, objects satisfying this interface will be
 // stopped by Stop.
 type Stopper interface {
 	Stop() error
+}
+
+// ContextStopper defines the StopContext method, objects satisfying this interface will be
+// stopped by Stop.
+type ContextStopper interface {
+	StopContext(context.Context) error
 }
 
 // Logger is used by Start/Stop to provide debug and error logging.
@@ -83,6 +108,63 @@ func Start(objects []*inject.Object, log Logger) error {
 	return err
 }
 
+// StartContext starts the graph, in the right order. Start will call StartContext or OpenContext if an
+// object satisfies the associated interface.
+func StartContext(ctx context.Context, objects []*inject.Object, log Logger) error {
+	levels, err := levels(objects)
+	if err != nil {
+		return err
+	}
+
+	for i := len(levels) - 1; i >= 0; i-- {
+		level := levels[i]
+		for _, o := range level {
+			ctxUsed := false
+			if openerO, ok := o.Value.(ContextOpener); ok {
+				ctxUsed = true
+				if log != nil {
+					log.Debugf("opening %s", o)
+				}
+				if err := openerO.OpenContext(ctx); err != nil {
+					return err
+				}
+			}
+			if starterO, ok := o.Value.(ContextStarter); ok {
+				ctxUsed = true
+				if log != nil {
+					log.Debugf("starting %s", o)
+				}
+				if err := starterO.StartContext(ctx); err != nil {
+					return err
+				}
+			}
+			// If the object implements the Context* interfaces, don't try to call
+			// the non-context interfaces. Otherwise, call them. This enables the use of
+			// Context interaces even if the entire graph hasn't been converted to use them yet
+			if ctxUsed {
+				continue
+			}
+			if openerO, ok := o.Value.(Opener); ok {
+				if log != nil {
+					log.Debugf("opening %s", o)
+				}
+				if err := openerO.Open(); err != nil {
+					return err
+				}
+			}
+			if starterO, ok := o.Value.(Starter); ok {
+				if log != nil {
+					log.Debugf("starting %s", o)
+				}
+				if err := starterO.Start(); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
 // Stop the graph, in the right order. Stop will call Stop or Close if an
 // object satisfies the associated interface. Unlike Start(), logs and
 // continues if a Stop or Close call returns an error.
@@ -94,6 +176,70 @@ func Stop(objects []*inject.Object, log Logger) error {
 
 	for _, level := range levels {
 		for _, o := range level {
+			if stopperO, ok := o.Value.(Stopper); ok {
+				if log != nil {
+					log.Debugf("stopping %s", o)
+				}
+				if err := stopperO.Stop(); err != nil {
+					if log != nil {
+						log.Errorf("error stopping %s: %s", o, err)
+					}
+				}
+			}
+			if closerO, ok := o.Value.(Closer); ok {
+				if log != nil {
+					log.Debugf("closing %s", o)
+				}
+				if err := closerO.Close(); err != nil {
+					if log != nil {
+						log.Errorf("error closing %s: %s", o, err)
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// StopContext stops the graph, in the right order. StopContext will call StopContext or CloseContext if an
+// object satisfies the associated interface. Unlike StartContext(), logs and
+// continues if a StopContext or CloseContext call returns an error.
+func StopContext(ctx context.Context, objects []*inject.Object, log Logger) error {
+	levels, err := levels(objects)
+	if err != nil {
+		return err
+	}
+
+	for _, level := range levels {
+		for _, o := range level {
+			ctxUsed := false
+			if stopperO, ok := o.Value.(ContextStopper); ok {
+				ctxUsed = true
+				if log != nil {
+					log.Debugf("stopping %s", o)
+				}
+				if err := stopperO.StopContext(ctx); err != nil {
+					if log != nil {
+						log.Errorf("error stopping %s: %s", o, err)
+					}
+				}
+			}
+			if closerO, ok := o.Value.(ContextCloser); ok {
+				if log != nil {
+					log.Debugf("closing %s", o)
+				}
+				if err := closerO.CloseContext(ctx); err != nil {
+					if log != nil {
+						log.Errorf("error closing %s: %s", o, err)
+					}
+				}
+			}
+			// If the object implements the Context* interfaces, don't try to call
+			// the non-context interfaces. Otherwise, call them. This enables the use of
+			// Context interaces even if the entire graph hasn't been converted to use them yet
+			if ctxUsed {
+				continue
+			}
 			if stopperO, ok := o.Value.(Stopper); ok {
 				if log != nil {
 					log.Debugf("stopping %s", o)

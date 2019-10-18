@@ -4,34 +4,23 @@ package startstop
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"sort"
 
 	"github.com/facebookgo/inject"
 )
 
-// Opener defines the Open method, objects satisfying this interface will be
-// opened by Start.
-type Opener interface {
-	Open() error
-}
-
-// Closer defines the Close method, objects satisfying this interface will be
-// closed by Stop.
-type Closer interface {
-	Close() error
-}
-
-// Starter defines the Start method, objects satisfying this interface will be
-// started by Start.
+// Starter defines the Start method. Objects satisfying this interface will be
+// started by Start
 type Starter interface {
-	Start() error
+	Start(context.Context) error
 }
 
 // Stopper defines the Stop method, objects satisfying this interface will be
 // stopped by Stop.
 type Stopper interface {
-	Stop() error
+	Stop(context.Context) error
 }
 
 // Logger is used by Start/Stop to provide debug and error logging.
@@ -40,53 +29,35 @@ type Logger interface {
 	Errorf(f string, args ...interface{})
 }
 
-// TryStart will start the graph, in the right order. It will call
-// Start or Open. It returns the list of objects that have been
-// successfully started. This can be used to stop only the
-// dependencies that have been correctly started.
-func TryStart(objects []*inject.Object, log Logger) ([]*inject.Object, error) {
+// Start starts the graph, in the right order. Start will call Start if an
+// object satisfies the associated interface.
+func Start(ctx context.Context, objects []*inject.Object, log Logger) error {
 	levels, err := levels(objects)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	var started []*inject.Object
 	for i := len(levels) - 1; i >= 0; i-- {
 		level := levels[i]
 		for _, o := range level {
-			if openerO, ok := o.Value.(Opener); ok {
-				if log != nil {
-					log.Debugf("opening %s", o)
-				}
-				if err := openerO.Open(); err != nil {
-					return started, err
-				}
-			}
 			if starterO, ok := o.Value.(Starter); ok {
+
 				if log != nil {
 					log.Debugf("starting %s", o)
 				}
-				if err := starterO.Start(); err != nil {
-					return started, err
+				if err := starterO.Start(ctx); err != nil {
+					return err
 				}
 			}
-			started = append(started, o)
 		}
 	}
-	return started, nil
+	return nil
 }
 
-// Start the graph, in the right order. Start will call Start or Open if an
-// object satisfies the associated interface.
-func Start(objects []*inject.Object, log Logger) error {
-	_, err := TryStart(objects, log)
-	return err
-}
-
-// Stop the graph, in the right order. Stop will call Stop or Close if an
+// Stop stops the graph, in the right order. Stop will call Stop if an
 // object satisfies the associated interface. Unlike Start(), logs and
-// continues if a Stop or Close call returns an error.
-func Stop(objects []*inject.Object, log Logger) error {
+// continues if a Stop call returns an error.
+func Stop(ctx context.Context, objects []*inject.Object, log Logger) error {
 	levels, err := levels(objects)
 	if err != nil {
 		return err
@@ -98,19 +69,9 @@ func Stop(objects []*inject.Object, log Logger) error {
 				if log != nil {
 					log.Debugf("stopping %s", o)
 				}
-				if err := stopperO.Stop(); err != nil {
+				if err := stopperO.Stop(ctx); err != nil {
 					if log != nil {
 						log.Errorf("error stopping %s: %s", o, err)
-					}
-				}
-			}
-			if closerO, ok := o.Value.(Closer); ok {
-				if log != nil {
-					log.Debugf("closing %s", o)
-				}
-				if err := closerO.Close(); err != nil {
-					if log != nil {
-						log.Errorf("error closing %s: %s", o, err)
 					}
 				}
 			}
@@ -230,12 +191,6 @@ func isEligible(i *inject.Object) bool {
 		return true
 	}
 	if _, ok := i.Value.(Stopper); ok {
-		return true
-	}
-	if _, ok := i.Value.(Opener); ok {
-		return true
-	}
-	if _, ok := i.Value.(Closer); ok {
 		return true
 	}
 	return false

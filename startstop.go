@@ -11,26 +11,6 @@ import (
 	"github.com/facebookgo/inject"
 )
 
-// Opener is deprecated
-type Opener interface {
-	Open() error
-}
-
-// Closer is deprecated
-type Closer interface {
-	Close() error
-}
-
-// Starter is deprecated
-type Starter interface {
-	Start() error
-}
-
-// Stopper is deprecated
-type Stopper interface {
-	Stop() error
-}
-
 // ContextStarter defines the StartContext method. Objects satisfying this interface will be
 // started by StartContext
 type ContextStarter interface {
@@ -47,85 +27,6 @@ type ContextStopper interface {
 type Logger interface {
 	Debugf(f string, args ...interface{})
 	Errorf(f string, args ...interface{})
-}
-
-// TryStart will start the graph, in the right order. It will call
-// Start or Open. It returns the list of objects that have been
-// successfully started. This can be used to stop only the
-// dependencies that have been correctly started.
-func TryStart(objects []*inject.Object, log Logger) ([]*inject.Object, error) {
-	levels, err := levels(objects)
-	if err != nil {
-		return nil, err
-	}
-
-	var started []*inject.Object
-	for i := len(levels) - 1; i >= 0; i-- {
-		level := levels[i]
-		for _, o := range level {
-			if openerO, ok := o.Value.(Opener); ok {
-				if log != nil {
-					log.Debugf("opening %s", o)
-				}
-				if err := openerO.Open(); err != nil {
-					return started, err
-				}
-			}
-			if starterO, ok := o.Value.(Starter); ok {
-				if log != nil {
-					log.Debugf("starting %s", o)
-				}
-				if err := starterO.Start(); err != nil {
-					return started, err
-				}
-			}
-			started = append(started, o)
-		}
-	}
-	return started, nil
-}
-
-// Start is deprecated. You should transition to StartContext, which allows the passing of
-// Context to objects
-func Start(objects []*inject.Object, log Logger) error {
-	_, err := TryStart(objects, log)
-	return err
-}
-
-// Stop the graph, in the right order. Stop will call Stop or Close if an
-// object satisfies the associated interface. Unlike Start(), logs and
-// continues if a Stop or Close call returns an error.
-func Stop(objects []*inject.Object, log Logger) error {
-	levels, err := levels(objects)
-	if err != nil {
-		return err
-	}
-
-	for _, level := range levels {
-		for _, o := range level {
-			if stopperO, ok := o.Value.(Stopper); ok {
-				if log != nil {
-					log.Debugf("stopping %s", o)
-				}
-				if err := stopperO.Stop(); err != nil {
-					if log != nil {
-						log.Errorf("error stopping %s: %s", o, err)
-					}
-				}
-			}
-			if closerO, ok := o.Value.(Closer); ok {
-				if log != nil {
-					log.Debugf("closing %s", o)
-				}
-				if err := closerO.Close(); err != nil {
-					if log != nil {
-						log.Errorf("error closing %s: %s", o, err)
-					}
-				}
-			}
-		}
-	}
-	return nil
 }
 
 // StartContext starts the graph, in the right order. Start will call StartContext if an
@@ -286,18 +187,6 @@ func allPaths(from, to *inject.Object, seen map[*inject.Object]bool) []path {
 }
 
 func isEligible(i *inject.Object) bool {
-	if _, ok := i.Value.(Starter); ok {
-		return true
-	}
-	if _, ok := i.Value.(Stopper); ok {
-		return true
-	}
-	if _, ok := i.Value.(Opener); ok {
-		return true
-	}
-	if _, ok := i.Value.(Closer); ok {
-		return true
-	}
 	if _, ok := i.Value.(ContextStarter); ok {
 		return true
 	}

@@ -27,295 +27,39 @@ func (t *testLogger) Errorf(f string, args ...interface{}) {
 }
 
 type startStop struct {
-	start func() error
-	stop  func() error
-}
-
-func (s *startStop) Start() error {
-	return s.start()
-}
-
-func (s *startStop) Stop() error {
-	return s.stop()
-}
-
-type startStop2 struct {
-	StartStop *startStop `inject:""`
-	start     func() error
-	stop      func() error
-}
-
-func (s *startStop2) Start() error {
-	return s.start()
-}
-
-func (s *startStop2) Stop() error {
-	return s.stop()
-}
-
-func TestStart(t *testing.T) {
-	fin := make(chan struct{})
-	obj := &startStop{
-		start: func() error {
-			defer close(fin)
-			return nil
-		},
-	}
-
-	var g inject.Graph
-	ensure.Nil(t, g.Provide(&inject.Object{Value: obj}))
-	ensure.Nil(t, g.Populate())
-	ensure.Nil(t, startstop.Start(g.Objects(), nil))
-	<-fin
-}
-
-func TestStop(t *testing.T) {
-	fin := make(chan struct{})
-	obj := &startStop{
-		start: func() error { return nil },
-		stop: func() error {
-			defer close(fin)
-			return nil
-		},
-	}
-
-	var g inject.Graph
-	ensure.Nil(t, g.Provide(&inject.Object{Value: obj}))
-	ensure.Nil(t, g.Populate())
-	ensure.Nil(t, startstop.Start(g.Objects(), nil))
-	ensure.Nil(t, startstop.Stop(g.Objects(), nil))
-	<-fin
-}
-
-func TestStartError(t *testing.T) {
-	fin := make(chan struct{})
-	actual := errors.New("err")
-	obj := &startStop{
-		start: func() error {
-			defer close(fin)
-			return actual
-		},
-	}
-
-	var g inject.Graph
-	ensure.Nil(t, g.Provide(&inject.Object{Value: obj}))
-	ensure.Nil(t, g.Populate())
-	ensure.DeepEqual(t, startstop.Start(g.Objects(), nil), actual)
-	<-fin
-}
-
-func TestTryStartError(t *testing.T) {
-	res := make(chan int, 3)
-	actual := errors.New("err")
-	obj1 := &startStop{
-		start: func() error {
-			defer func() { res <- 1 }()
-			return nil
-		},
-		stop: func() error {
-			defer func() { res <- 3 }()
-			return nil
-		},
-	}
-	obj2 := &startStop2{
-		start: func() error {
-			defer func() { res <- 2 }()
-			return actual
-		},
-		stop: func() error {
-			t.Fatal("should not get called")
-			return nil
-		},
-	}
-
-	var g inject.Graph
-	ensure.Nil(t, g.Provide(
-		&inject.Object{Value: obj1},
-		&inject.Object{Value: obj2},
-	))
-	ensure.Nil(t, g.Populate())
-	started, err := startstop.TryStart(g.Objects(), nil)
-	ensure.DeepEqual(t, <-res, 1)
-	ensure.DeepEqual(t, <-res, 2)
-	ensure.DeepEqual(t, err, actual)
-	ensure.Nil(t, startstop.Stop(started, nil))
-	ensure.DeepEqual(t, <-res, 3)
-}
-
-func TestStopError(t *testing.T) {
-	var stopped bool
-	actual := errors.New("err")
-	obj1 := &startStop{
-		start: func() error { return nil },
-		stop: func() error {
-			stopped = true
-			return nil
-		},
-	}
-	obj2 := &startStop2{
-		start: func() error { return nil },
-		stop: func() error {
-			return actual
-		},
-	}
-	logger := &testLogger{}
-
-	var g inject.Graph
-	ensure.Nil(t, g.Provide(
-		&inject.Object{Value: obj1},
-		&inject.Object{Value: obj2},
-	))
-	ensure.Nil(t, g.Populate())
-	ensure.Nil(t, startstop.Start(g.Objects(), logger))
-	ensure.Nil(t, startstop.Stop(g.Objects(), logger))
-	ensure.DeepEqual(t, logger.debugs, []string{
-		"starting *startstop_test.startStop",
-		"starting *startstop_test.startStop2",
-		"stopping *startstop_test.startStop2",
-		"stopping *startstop_test.startStop",
-	})
-	ensure.DeepEqual(t, logger.errors, []string{"error stopping *startstop_test.startStop2: err"})
-	ensure.True(t, stopped)
-}
-
-func TestStartOrder(t *testing.T) {
-	res := make(chan int, 2)
-	obj1 := &startStop{
-		start: func() error {
-			defer func() { res <- 1 }()
-			return nil
-		},
-	}
-	obj2 := &startStop2{
-		start: func() error {
-			defer func() { res <- 2 }()
-			return nil
-		},
-	}
-
-	var g inject.Graph
-	ensure.Nil(
-		t,
-		g.Provide(
-			&inject.Object{Value: obj1},
-			&inject.Object{Value: obj2},
-		),
-	)
-	ensure.Nil(t, g.Populate())
-	ensure.Nil(t, startstop.Start(g.Objects(), nil))
-	ensure.DeepEqual(t, <-res, 1)
-	ensure.DeepEqual(t, <-res, 2)
-}
-
-type openClose struct {
-	open  func() error
-	close func() error
-}
-
-func (s *openClose) Open() error {
-	return s.open()
-}
-
-func (s *openClose) Close() error {
-	return s.close()
-}
-
-func TestOpen(t *testing.T) {
-	fin := make(chan struct{})
-	obj := &openClose{
-		open: func() error {
-			defer close(fin)
-			return nil
-		},
-	}
-
-	var g inject.Graph
-	ensure.Nil(t, g.Provide(&inject.Object{Value: obj}))
-	ensure.Nil(t, g.Populate())
-	ensure.Nil(t, startstop.Start(g.Objects(), nil))
-	<-fin
-}
-
-func TestClose(t *testing.T) {
-	fin := make(chan struct{})
-	obj := &openClose{
-		open: func() error { return nil },
-		close: func() error {
-			defer close(fin)
-			return nil
-		},
-	}
-
-	var g inject.Graph
-	ensure.Nil(t, g.Provide(&inject.Object{Value: obj}))
-	ensure.Nil(t, g.Populate())
-	ensure.Nil(t, startstop.Start(g.Objects(), nil))
-	ensure.Nil(t, startstop.Stop(g.Objects(), nil))
-	<-fin
-}
-
-func TestOpenError(t *testing.T) {
-	fin := make(chan struct{})
-	actual := errors.New("err")
-	obj := &openClose{
-		open: func() error {
-			defer close(fin)
-			return actual
-		},
-	}
-
-	var g inject.Graph
-	ensure.Nil(t, g.Provide(&inject.Object{Value: obj}))
-	ensure.Nil(t, g.Populate())
-	ensure.DeepEqual(t, startstop.Start(g.Objects(), nil), actual)
-	<-fin
-}
-
-func TestCloseError(t *testing.T) {
-	fin := make(chan struct{})
-	actual := errors.New("err")
-	obj := &openClose{
-		open: func() error { return nil },
-		close: func() error {
-			defer close(fin)
-			return actual
-		},
-	}
-	logger := &testLogger{}
-
-	var g inject.Graph
-	ensure.Nil(t, g.Provide(&inject.Object{Value: obj}))
-	ensure.Nil(t, g.Populate())
-	ensure.Nil(t, startstop.Start(g.Objects(), logger))
-	ensure.Nil(t, startstop.Stop(g.Objects(), logger))
-	ensure.DeepEqual(t, logger.debugs, []string{
-		"opening *startstop_test.openClose",
-		"closing *startstop_test.openClose",
-	})
-	ensure.DeepEqual(t, logger.errors, []string{"error closing *startstop_test.openClose: err"})
-	<-fin
-}
-
-type startStopContext struct {
 	start func(context.Context) error
 	stop  func(context.Context) error
 }
 
-func (s *startStopContext) StartContext(ctx context.Context) error {
+func (s *startStop) StartContext(ctx context.Context) error {
 	return s.start(ctx)
 }
 
-func (s *startStopContext) StopContext(ctx context.Context) error {
+func (s *startStop) StopContext(ctx context.Context) error {
+	return s.stop(ctx)
+}
+
+type startStop2 struct {
+	StartStop *startStop `inject:""`
+	start     func(context.Context) error
+	stop      func(context.Context) error
+}
+
+func (s *startStop2) StartContext(ctx context.Context) error {
+	return s.start(ctx)
+}
+
+func (s *startStop2) StopContext(ctx context.Context) error {
 	return s.stop(ctx)
 }
 
 func TestStartContext(t *testing.T) {
 	tctx := context.Background()
 	fin := make(chan struct{})
-	obj := &startStopContext{
+	obj := &startStop{
 		start: func(ctx context.Context) error {
-			defer close(fin)
 			ensure.DeepEqual(t, ctx, tctx)
+			defer close(fin)
 			return nil
 		},
 	}
@@ -330,14 +74,14 @@ func TestStartContext(t *testing.T) {
 func TestStopContext(t *testing.T) {
 	tctx := context.Background()
 	fin := make(chan struct{})
-	obj := &startStopContext{
+	obj := &startStop{
 		start: func(ctx context.Context) error {
 			ensure.DeepEqual(t, ctx, tctx)
 			return nil
 		},
 		stop: func(ctx context.Context) error {
-			defer close(fin)
 			ensure.DeepEqual(t, ctx, tctx)
+			defer close(fin)
 			return nil
 		},
 	}
@@ -350,19 +94,101 @@ func TestStopContext(t *testing.T) {
 	<-fin
 }
 
+func TestStartError(t *testing.T) {
+	fin := make(chan struct{})
+	actual := errors.New("err")
+	obj := &startStop{
+		start: func(ctx context.Context) error {
+			defer close(fin)
+			return actual
+		},
+	}
+
+	var g inject.Graph
+	ensure.Nil(t, g.Provide(&inject.Object{Value: obj}))
+	ensure.Nil(t, g.Populate())
+	ensure.DeepEqual(t, startstop.StartContext(context.Background(), g.Objects(), nil), actual)
+	<-fin
+}
+
+func TestStopError(t *testing.T) {
+	var stopped bool
+	actual := errors.New("err")
+	obj1 := &startStop{
+		start: func(ctx context.Context) error { return nil },
+		stop: func(ctx context.Context) error {
+			stopped = true
+			return nil
+		},
+	}
+	obj2 := &startStop2{
+		start: func(ctx context.Context) error { return nil },
+		stop: func(ctx context.Context) error {
+			return actual
+		},
+	}
+	logger := &testLogger{}
+
+	var g inject.Graph
+	ensure.Nil(t, g.Provide(
+		&inject.Object{Value: obj1},
+		&inject.Object{Value: obj2},
+	))
+	ensure.Nil(t, g.Populate())
+	ensure.Nil(t, startstop.StartContext(context.Background(), g.Objects(), logger))
+	ensure.Nil(t, startstop.StopContext(context.Background(), g.Objects(), logger))
+	ensure.DeepEqual(t, logger.debugs, []string{
+		"starting *startstop_test.startStop",
+		"starting *startstop_test.startStop2",
+		"stopping *startstop_test.startStop2",
+		"stopping *startstop_test.startStop",
+	})
+	ensure.DeepEqual(t, logger.errors, []string{"error stopping *startstop_test.startStop2: err"})
+	ensure.True(t, stopped)
+}
+
+func TestStartOrder(t *testing.T) {
+	res := make(chan int, 2)
+	obj1 := &startStop{
+		start: func(ctx context.Context) error {
+			defer func() { res <- 1 }()
+			return nil
+		},
+	}
+	obj2 := &startStop2{
+		start: func(ctx context.Context) error {
+			defer func() { res <- 2 }()
+			return nil
+		},
+	}
+
+	var g inject.Graph
+	ensure.Nil(
+		t,
+		g.Provide(
+			&inject.Object{Value: obj1},
+			&inject.Object{Value: obj2},
+		),
+	)
+	ensure.Nil(t, g.Populate())
+	ensure.Nil(t, startstop.StartContext(context.Background(), g.Objects(), nil))
+	ensure.DeepEqual(t, <-res, 1)
+	ensure.DeepEqual(t, <-res, 2)
+}
+
 type caseStartStop struct {
 	Name      string
 	ValidCase *ValidCase
 }
 
-func (c *caseStartStop) Start() error {
+func (c *caseStartStop) StartContext(ctx context.Context) error {
 	c.ValidCase.mutex.Lock()
 	defer c.ValidCase.mutex.Unlock()
 	c.ValidCase.actualStart = append(c.ValidCase.actualStart, c.Name)
 	return nil
 }
 
-func (c *caseStartStop) Stop() error {
+func (c *caseStartStop) StopContext(ctx context.Context) error {
 	c.ValidCase.mutex.Lock()
 	defer c.ValidCase.mutex.Unlock()
 	c.ValidCase.actualStop = append(c.ValidCase.actualStop, c.Name)
@@ -432,8 +258,8 @@ func (c *ValidCase) Objects() []*inject.Object {
 
 func (c *ValidCase) Run() {
 	objects := c.Objects()
-	ensure.Nil(c.T, startstop.Start(objects, nil))
-	ensure.Nil(c.T, startstop.Stop(objects, nil))
+	ensure.Nil(c.T, startstop.StartContext(context.Background(), objects, nil))
+	ensure.Nil(c.T, startstop.StopContext(context.Background(), objects, nil))
 
 	// make a reverseStop to make comparing the expected results easier
 	reverseStop := make([]string, len(c.actualStop))
@@ -608,8 +434,8 @@ func (c *InvalidCase) Objects() []*inject.Object {
 		var value interface{}
 		if hasStartStop[name] {
 			value = &startStop{
-				start: func() error { c.T.Fatal("should not get called"); return nil },
-				stop:  func() error { c.T.Fatal("should not get called"); return nil },
+				start: func(ctx context.Context) error { c.T.Fatal("should not get called"); return nil },
+				stop:  func(ctx context.Context) error { c.T.Fatal("should not get called"); return nil },
 			}
 		} else {
 			value = struct{}{}
@@ -643,11 +469,11 @@ func (c *InvalidCase) Objects() []*inject.Object {
 func (c *InvalidCase) Run() {
 	objects := c.Objects()
 
-	err := startstop.Start(objects, nil)
+	err := startstop.StartContext(context.Background(), objects, nil)
 	ensure.NotNil(c.T, err)
 	c.EnsureExpectedCycle(err)
 
-	err = startstop.Stop(objects, nil)
+	err = startstop.StopContext(context.Background(), objects, nil)
 	ensure.NotNil(c.T, err)
 	c.EnsureExpectedCycle(err)
 }
@@ -739,35 +565,19 @@ func TestSelfDependent(t *testing.T) {
 }
 
 type startButNoStop struct {
-	start func() error
+	start func(context.Context) error
 }
 
-func (s *startButNoStop) Start() error {
-	return s.start()
+func (s *startButNoStop) StartContext(ctx context.Context) error {
+	return s.start(ctx)
 }
 
 type stopButNoStart struct {
-	stop func() error
+	stop func(context.Context) error
 }
 
-func (s *stopButNoStart) Stop() error {
-	return s.stop()
-}
-
-type openButNoClose struct {
-	open func() error
-}
-
-func (s *openButNoClose) Open() error {
-	return s.open()
-}
-
-type closeButNoOpen struct {
-	close func() error
-}
-
-func (s *closeButNoOpen) Close() error {
-	return s.close()
+func (s *stopButNoStart) StopContext(ctx context.Context) error {
+	return s.stop(ctx)
 }
 
 func TestOneHalfOnly(t *testing.T) {
@@ -778,15 +588,7 @@ func TestOneHalfOnly(t *testing.T) {
 		g.Provide(
 			&inject.Object{
 				Value: &startButNoStop{
-					start: func() error {
-						defer func() { res <- 1 }()
-						return nil
-					},
-				},
-			},
-			&inject.Object{
-				Value: &openButNoClose{
-					open: func() error {
+					start: func(ctx context.Context) error {
 						defer func() { res <- 1 }()
 						return nil
 					},
@@ -794,15 +596,7 @@ func TestOneHalfOnly(t *testing.T) {
 			},
 			&inject.Object{
 				Value: &stopButNoStart{
-					stop: func() error {
-						defer func() { res <- 2 }()
-						return nil
-					},
-				},
-			},
-			&inject.Object{
-				Value: &closeButNoOpen{
-					close: func() error {
+					stop: func(ctx context.Context) error {
 						defer func() { res <- 2 }()
 						return nil
 					},
@@ -811,10 +605,8 @@ func TestOneHalfOnly(t *testing.T) {
 		),
 	)
 	ensure.Nil(t, g.Populate())
-	ensure.Nil(t, startstop.Start(g.Objects(), nil))
-	ensure.Nil(t, startstop.Stop(g.Objects(), nil))
+	ensure.Nil(t, startstop.StartContext(context.Background(), g.Objects(), nil))
+	ensure.Nil(t, startstop.StopContext(context.Background(), g.Objects(), nil))
 	ensure.DeepEqual(t, <-res, 1)
-	ensure.DeepEqual(t, <-res, 1)
-	ensure.DeepEqual(t, <-res, 2)
 	ensure.DeepEqual(t, <-res, 2)
 }

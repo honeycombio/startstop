@@ -11,16 +11,16 @@ import (
 	"github.com/facebookgo/inject"
 )
 
-// ContextStarter defines the StartContext method. Objects satisfying this interface will be
-// started by StartContext
-type ContextStarter interface {
-	StartContext(context.Context) error
+// Starter defines the Start method. Objects satisfying this interface will be
+// started by Start
+type Starter interface {
+	Start(context.Context) error
 }
 
-// ContextStopper defines the StopContext method, objects satisfying this interface will be
+// Stopper defines the Stop method, objects satisfying this interface will be
 // stopped by Stop.
-type ContextStopper interface {
-	StopContext(context.Context) error
+type Stopper interface {
+	Stop(context.Context) error
 }
 
 // Logger is used by Start/Stop to provide debug and error logging.
@@ -29,9 +29,9 @@ type Logger interface {
 	Errorf(f string, args ...interface{})
 }
 
-// StartContext starts the graph, in the right order. Start will call StartContext if an
+// Start starts the graph, in the right order. Start will call Start if an
 // object satisfies the associated interface.
-func StartContext(ctx context.Context, objects []*inject.Object, log Logger) error {
+func Start(ctx context.Context, objects []*inject.Object, log Logger) error {
 	levels, err := levels(objects)
 	if err != nil {
 		return err
@@ -40,12 +40,12 @@ func StartContext(ctx context.Context, objects []*inject.Object, log Logger) err
 	for i := len(levels) - 1; i >= 0; i-- {
 		level := levels[i]
 		for _, o := range level {
-			if starterO, ok := o.Value.(ContextStarter); ok {
+			if starterO, ok := o.Value.(Starter); ok {
 
 				if log != nil {
 					log.Debugf("starting %s", o)
 				}
-				if err := starterO.StartContext(ctx); err != nil {
+				if err := starterO.Start(ctx); err != nil {
 					return err
 				}
 			}
@@ -54,10 +54,10 @@ func StartContext(ctx context.Context, objects []*inject.Object, log Logger) err
 	return nil
 }
 
-// StopContext stops the graph, in the right order. StopContext will call StopContext if an
-// object satisfies the associated interface. Unlike StartContext(), logs and
-// continues if a StopContext call returns an error.
-func StopContext(ctx context.Context, objects []*inject.Object, log Logger) error {
+// Stop stops the graph, in the right order. Stop will call Stop if an
+// object satisfies the associated interface. Unlike Start(), logs and
+// continues if a Stop call returns an error.
+func Stop(ctx context.Context, objects []*inject.Object, log Logger) error {
 	levels, err := levels(objects)
 	if err != nil {
 		return err
@@ -65,11 +65,11 @@ func StopContext(ctx context.Context, objects []*inject.Object, log Logger) erro
 
 	for _, level := range levels {
 		for _, o := range level {
-			if stopperO, ok := o.Value.(ContextStopper); ok {
+			if stopperO, ok := o.Value.(Stopper); ok {
 				if log != nil {
 					log.Debugf("stopping %s", o)
 				}
-				if err := stopperO.StopContext(ctx); err != nil {
+				if err := stopperO.Stop(ctx); err != nil {
 					if log != nil {
 						log.Errorf("error stopping %s: %s", o, err)
 					}
@@ -187,10 +187,10 @@ func allPaths(from, to *inject.Object, seen map[*inject.Object]bool) []path {
 }
 
 func isEligible(i *inject.Object) bool {
-	if _, ok := i.Value.(ContextStarter); ok {
+	if _, ok := i.Value.(Starter); ok {
 		return true
 	}
-	if _, ok := i.Value.(ContextStopper); ok {
+	if _, ok := i.Value.(Stopper); ok {
 		return true
 	}
 	return false

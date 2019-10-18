@@ -31,11 +31,11 @@ type startStop struct {
 	stop  func(context.Context) error
 }
 
-func (s *startStop) StartContext(ctx context.Context) error {
+func (s *startStop) Start(ctx context.Context) error {
 	return s.start(ctx)
 }
 
-func (s *startStop) StopContext(ctx context.Context) error {
+func (s *startStop) Stop(ctx context.Context) error {
 	return s.stop(ctx)
 }
 
@@ -45,15 +45,15 @@ type startStop2 struct {
 	stop      func(context.Context) error
 }
 
-func (s *startStop2) StartContext(ctx context.Context) error {
+func (s *startStop2) Start(ctx context.Context) error {
 	return s.start(ctx)
 }
 
-func (s *startStop2) StopContext(ctx context.Context) error {
+func (s *startStop2) Stop(ctx context.Context) error {
 	return s.stop(ctx)
 }
 
-func TestStartContext(t *testing.T) {
+func TestStart(t *testing.T) {
 	tctx := context.Background()
 	fin := make(chan struct{})
 	obj := &startStop{
@@ -67,11 +67,11 @@ func TestStartContext(t *testing.T) {
 	var g inject.Graph
 	ensure.Nil(t, g.Provide(&inject.Object{Value: obj}))
 	ensure.Nil(t, g.Populate())
-	ensure.Nil(t, startstop.StartContext(tctx, g.Objects(), nil))
+	ensure.Nil(t, startstop.Start(tctx, g.Objects(), nil))
 	<-fin
 }
 
-func TestStopContext(t *testing.T) {
+func TestStop(t *testing.T) {
 	tctx := context.Background()
 	fin := make(chan struct{})
 	obj := &startStop{
@@ -89,8 +89,8 @@ func TestStopContext(t *testing.T) {
 	var g inject.Graph
 	ensure.Nil(t, g.Provide(&inject.Object{Value: obj}))
 	ensure.Nil(t, g.Populate())
-	ensure.Nil(t, startstop.StartContext(tctx, g.Objects(), nil))
-	ensure.Nil(t, startstop.StopContext(tctx, g.Objects(), nil))
+	ensure.Nil(t, startstop.Start(tctx, g.Objects(), nil))
+	ensure.Nil(t, startstop.Stop(tctx, g.Objects(), nil))
 	<-fin
 }
 
@@ -107,7 +107,7 @@ func TestStartError(t *testing.T) {
 	var g inject.Graph
 	ensure.Nil(t, g.Provide(&inject.Object{Value: obj}))
 	ensure.Nil(t, g.Populate())
-	ensure.DeepEqual(t, startstop.StartContext(context.Background(), g.Objects(), nil), actual)
+	ensure.DeepEqual(t, startstop.Start(context.Background(), g.Objects(), nil), actual)
 	<-fin
 }
 
@@ -135,8 +135,8 @@ func TestStopError(t *testing.T) {
 		&inject.Object{Value: obj2},
 	))
 	ensure.Nil(t, g.Populate())
-	ensure.Nil(t, startstop.StartContext(context.Background(), g.Objects(), logger))
-	ensure.Nil(t, startstop.StopContext(context.Background(), g.Objects(), logger))
+	ensure.Nil(t, startstop.Start(context.Background(), g.Objects(), logger))
+	ensure.Nil(t, startstop.Stop(context.Background(), g.Objects(), logger))
 	ensure.DeepEqual(t, logger.debugs, []string{
 		"starting *startstop_test.startStop",
 		"starting *startstop_test.startStop2",
@@ -171,7 +171,7 @@ func TestStartOrder(t *testing.T) {
 		),
 	)
 	ensure.Nil(t, g.Populate())
-	ensure.Nil(t, startstop.StartContext(context.Background(), g.Objects(), nil))
+	ensure.Nil(t, startstop.Start(context.Background(), g.Objects(), nil))
 	ensure.DeepEqual(t, <-res, 1)
 	ensure.DeepEqual(t, <-res, 2)
 }
@@ -181,14 +181,14 @@ type caseStartStop struct {
 	ValidCase *ValidCase
 }
 
-func (c *caseStartStop) StartContext(ctx context.Context) error {
+func (c *caseStartStop) Start(ctx context.Context) error {
 	c.ValidCase.mutex.Lock()
 	defer c.ValidCase.mutex.Unlock()
 	c.ValidCase.actualStart = append(c.ValidCase.actualStart, c.Name)
 	return nil
 }
 
-func (c *caseStartStop) StopContext(ctx context.Context) error {
+func (c *caseStartStop) Stop(ctx context.Context) error {
 	c.ValidCase.mutex.Lock()
 	defer c.ValidCase.mutex.Unlock()
 	c.ValidCase.actualStop = append(c.ValidCase.actualStop, c.Name)
@@ -258,8 +258,8 @@ func (c *ValidCase) Objects() []*inject.Object {
 
 func (c *ValidCase) Run() {
 	objects := c.Objects()
-	ensure.Nil(c.T, startstop.StartContext(context.Background(), objects, nil))
-	ensure.Nil(c.T, startstop.StopContext(context.Background(), objects, nil))
+	ensure.Nil(c.T, startstop.Start(context.Background(), objects, nil))
+	ensure.Nil(c.T, startstop.Stop(context.Background(), objects, nil))
 
 	// make a reverseStop to make comparing the expected results easier
 	reverseStop := make([]string, len(c.actualStop))
@@ -469,11 +469,11 @@ func (c *InvalidCase) Objects() []*inject.Object {
 func (c *InvalidCase) Run() {
 	objects := c.Objects()
 
-	err := startstop.StartContext(context.Background(), objects, nil)
+	err := startstop.Start(context.Background(), objects, nil)
 	ensure.NotNil(c.T, err)
 	c.EnsureExpectedCycle(err)
 
-	err = startstop.StopContext(context.Background(), objects, nil)
+	err = startstop.Stop(context.Background(), objects, nil)
 	ensure.NotNil(c.T, err)
 	c.EnsureExpectedCycle(err)
 }
@@ -568,7 +568,7 @@ type startButNoStop struct {
 	start func(context.Context) error
 }
 
-func (s *startButNoStop) StartContext(ctx context.Context) error {
+func (s *startButNoStop) Start(ctx context.Context) error {
 	return s.start(ctx)
 }
 
@@ -576,7 +576,7 @@ type stopButNoStart struct {
 	stop func(context.Context) error
 }
 
-func (s *stopButNoStart) StopContext(ctx context.Context) error {
+func (s *stopButNoStart) Stop(ctx context.Context) error {
 	return s.stop(ctx)
 }
 
@@ -605,8 +605,8 @@ func TestOneHalfOnly(t *testing.T) {
 		),
 	)
 	ensure.Nil(t, g.Populate())
-	ensure.Nil(t, startstop.StartContext(context.Background(), g.Objects(), nil))
-	ensure.Nil(t, startstop.StopContext(context.Background(), g.Objects(), nil))
+	ensure.Nil(t, startstop.Start(context.Background(), g.Objects(), nil))
+	ensure.Nil(t, startstop.Stop(context.Background(), g.Objects(), nil))
 	ensure.DeepEqual(t, <-res, 1)
 	ensure.DeepEqual(t, <-res, 2)
 }
